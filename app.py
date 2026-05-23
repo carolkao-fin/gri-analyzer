@@ -4,6 +4,7 @@ import pdfplumber
 import io
 import json
 import re
+import time
 
 from gri_reference import ALL_STANDARDS
 
@@ -113,33 +114,40 @@ def analyze_report(text: str, api_key: str) -> dict:
         st.error("請在左側欄位輸入 Groq API Key。")
         st.stop()
 
-    MAX_CHARS = 80_000
+    MAX_CHARS = 25_000
     truncated = len(text) > MAX_CHARS
     display_text = text[:MAX_CHARS] if truncated else text
     notice = "[注意：文件過長，已截取前段內容進行分析]" if truncated else ""
 
     prompt = ANALYSIS_PROMPT.format(truncated_notice=notice, text=display_text)
 
-    try:
-        client = Groq(api_key=api_key)
-        response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user",   "content": prompt},
-            ],
-            temperature=0.1,
-            max_tokens=8192,
-        )
-    except Exception as e:
-        err = str(e)
-        if "rate_limit" in err.lower() or "429" in err:
-            st.error("⚠️ 請求過於頻繁，請稍等 1 分鐘後再試。")
-        elif "401" in err or "invalid" in err.lower():
-            st.error("⚠️ API Key 無效，請確認後重新輸入。")
-        else:
-            st.error(f"API 呼叫失敗：{err}")
-        st.stop()
+    client = Groq(api_key=api_key)
+
+    for attempt in range(2):
+        try:
+            response = client.chat.completions.create(
+                model="llama-3.1-8b-instant",
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user",   "content": prompt},
+                ],
+                temperature=0.1,
+                max_tokens=4096,
+            )
+            break
+        except Exception as e:
+            err = str(e)
+            if ("rate_limit" in err.lower() or "429" in err) and attempt == 0:
+                with st.spinner("請求頻率過高，60 秒後自動重試…"):
+                    time.sleep(60)
+                continue
+            if "401" in err or "invalid" in err.lower():
+                st.error("⚠️ API Key 無效，請確認後重新輸入。")
+            elif "rate_limit" in err.lower() or "429" in err:
+                st.error("⚠️ 額度仍然不足，請稍後再試或換一把 API Key。")
+            else:
+                st.error(f"API 呼叫失敗：{err}")
+            st.stop()
 
     raw = response.choices[0].message.content
 
