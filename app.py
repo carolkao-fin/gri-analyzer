@@ -13,6 +13,21 @@ st.set_page_config(
     layout="wide"
 )
 
+# ── API Key Input ────────────────────────────────────────
+
+with st.sidebar:
+    st.markdown("### 🔑 Google API Key")
+    api_key = st.text_input(
+        "輸入你的 Google API Key",
+        type="password",
+        placeholder="AIza...",
+        help="免費取得：https://aistudio.google.com/app/apikey",
+    )
+    if api_key:
+        st.success("API Key 已設定")
+    else:
+        st.warning("請先輸入 API Key 才能開始分析")
+
 # ── PDF Extraction ───────────────────────────────────────
 
 def extract_pdf_text(uploaded_file) -> tuple[str, int]:
@@ -97,11 +112,9 @@ JSON 結構如下：
 
 # ── Gemini API Call ──────────────────────────────────────
 
-def analyze_report(text: str) -> dict:
-    try:
-        api_key = st.secrets["GOOGLE_API_KEY"]
-    except Exception:
-        st.error("未設定 GOOGLE_API_KEY，請在 Streamlit secrets 中加入此金鑰。")
+def analyze_report(text: str, api_key: str) -> dict:
+    if not api_key:
+        st.error("請在左側欄位輸入 Google API Key。")
         st.stop()
 
     MAX_CHARS = 800_000  # Gemini 1.5/2.0 supports 1M token context
@@ -265,7 +278,7 @@ if uploaded_files:
     names = [f.name for f in uploaded_files]
     st.markdown(f"已選擇 **{len(names)}** 份：{', '.join(names)}")
 
-    if st.button("🔍 開始分析", type="primary", use_container_width=True):
+    if st.button("🔍 開始分析", type="primary", use_container_width=True, disabled=not api_key):
         if "results" not in st.session_state:
             st.session_state.results = {}
 
@@ -276,7 +289,7 @@ if uploaded_files:
                 bar.progress(i / len(uploaded_files), text=f"分析中：{f.name}")
                 f.seek(0)
                 text, page_count = extract_pdf_text(f)
-                result = analyze_report(text)
+                result = analyze_report(text, api_key)
                 result["_page_count"] = page_count
                 st.session_state.results[f.name] = result
 
