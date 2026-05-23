@@ -32,15 +32,30 @@ with st.sidebar:
 # ── PDF Extraction ───────────────────────────────────────
 
 def extract_pdf_text(uploaded_file) -> tuple[str, int]:
+    """
+    Extract text from key pages only:
+    - Reports ≤ 30 pages: all pages
+    - Reports > 30 pages: first 10 pages (overview/materiality) +
+                          last 12 pages (GRI index/appendices)
+    These sections contain the most GRI-relevant content.
+    """
     data = uploaded_file.read()
-    pages = []
+    pages_text = []
     with pdfplumber.open(io.BytesIO(data)) as pdf:
         total = len(pdf.pages)
-        for i, page in enumerate(pdf.pages):
-            text = page.extract_text() or ""
+        if total > 30:
+            front   = list(range(min(10, total)))
+            back    = list(range(max(0, total - 12), total))
+            indices = sorted(set(front + back))
+        else:
+            indices = list(range(total))
+
+        for i in indices:
+            text = pdf.pages[i].extract_text() or ""
             if text.strip():
-                pages.append(f"[第 {i+1} 頁]\n{text}")
-    return "\n\n".join(pages), total
+                pages_text.append(f"[第 {i+1} 頁]\n{text}")
+
+    return "\n\n".join(pages_text), total
 
 
 # ── Prompt ───────────────────────────────────────────────
@@ -114,10 +129,11 @@ def analyze_report(text: str, api_key: str) -> dict:
         st.error("請在左側欄位輸入 Groq API Key。")
         st.stop()
 
-    MAX_CHARS = 25_000
+    # Chinese text ≈ 2 tokens/char; keep well within Groq 20k TPM
+    MAX_CHARS = 6_000
     truncated = len(text) > MAX_CHARS
     display_text = text[:MAX_CHARS] if truncated else text
-    notice = "[注意：文件過長，已截取前段內容進行分析]" if truncated else ""
+    notice = "[注意：已截取關鍵頁面內容進行分析（概覽頁＋GRI索引頁）]" if truncated else ""
 
     prompt = ANALYSIS_PROMPT.format(truncated_notice=notice, text=display_text)
 
@@ -132,7 +148,7 @@ def analyze_report(text: str, api_key: str) -> dict:
                     {"role": "user",   "content": prompt},
                 ],
                 temperature=0.1,
-                max_tokens=4096,
+                max_tokens=2048,
             )
             break
         except Exception as e:
