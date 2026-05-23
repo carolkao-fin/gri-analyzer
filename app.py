@@ -1,11 +1,11 @@
 import streamlit as st
-import google.generativeai as genai
+from groq import Groq
 import pdfplumber
 import io
 import json
 import re
 
-from gri_reference import GRI_REFERENCE_TEXT, ALL_STANDARDS
+from gri_reference import ALL_STANDARDS
 
 st.set_page_config(
     page_title="永續報告書 GRI 分析工具",
@@ -16,12 +16,12 @@ st.set_page_config(
 # ── API Key Input ────────────────────────────────────────
 
 with st.sidebar:
-    st.markdown("### 🔑 Google API Key")
-    st.markdown("[免費申請 API Key →](https://aistudio.google.com/app/apikey)", unsafe_allow_html=False)
+    st.markdown("### 🔑 Groq API Key")
+    st.markdown("[免費申請 API Key →](https://console.groq.com/keys)", unsafe_allow_html=False)
     api_key = st.text_input(
-        "輸入你的 Google API Key",
+        "輸入你的 Groq API Key",
         type="password",
-        placeholder="AIza...",
+        placeholder="gsk_...",
     )
     if api_key:
         st.success("API Key 已設定")
@@ -44,20 +44,16 @@ def extract_pdf_text(uploaded_file) -> tuple[str, int]:
 
 # ── Prompt ───────────────────────────────────────────────
 
-SYSTEM_PROMPT = f"""你是永續報告書分析專家，精通 GRI（Global Reporting Initiative）準則。
-
-以下是 GRI 2021 官方標準完整對照表，你必須只使用這份清單中的代碼，不得自創代碼：
-
-{GRI_REFERENCE_TEXT}
+SYSTEM_PROMPT = """你是永續報告書分析專家，精通 GRI（Global Reporting Initiative）2021 準則。
 
 分析規則：
-- 章節對應的 GRI 代碼必須來自上表，並附上官方說明
+- 只使用真實存在的 GRI 官方代碼（GRI 2、GRI 3、GRI 201–207、GRI 301–308、GRI 401–418），不得自創代碼
+- 每個 GRI 代碼須附上官方英文名稱
 - 揭露品質評估：
   • 完整 = 有量化數據且邊界清楚
   • 部分 = 有提及但缺乏量化或範圍不完整
   • 不足 = 僅文字描述或完全未揭露
-- 重大議題需對應 GRI 3-1、3-2、3-3
-"""
+- 重大議題需對應 GRI 3-1、3-2、3-3"""
 
 ANALYSIS_PROMPT = """請分析以下永續報告書，輸出結構化 JSON，不得輸出 JSON 以外的任何文字。
 
@@ -110,48 +106,43 @@ JSON 結構如下：
 {text}"""
 
 
-# ── Gemini API Call ──────────────────────────────────────
+# ── Groq API Call ────────────────────────────────────────
 
 def analyze_report(text: str, api_key: str) -> dict:
     if not api_key:
-        st.error("請在左側欄位輸入 Google API Key。")
+        st.error("請在左側欄位輸入 Groq API Key。")
         st.stop()
 
-    MAX_CHARS = 120_000
+    MAX_CHARS = 80_000
     truncated = len(text) > MAX_CHARS
     display_text = text[:MAX_CHARS] if truncated else text
     notice = "[注意：文件過長，已截取前段內容進行分析]" if truncated else ""
 
-    prompt = SYSTEM_PROMPT + "\n\n" + ANALYSIS_PROMPT.format(
-        truncated_notice=notice,
-        text=display_text,
-    )
-
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    prompt = ANALYSIS_PROMPT.format(truncated_notice=notice, text=display_text)
 
     try:
-        response = model.generate_content(
-            prompt,
-            generation_config=genai.GenerationConfig(
-                temperature=0.1,
-                max_output_tokens=8192,
-            ),
+        client = Groq(api_key=api_key)
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user",   "content": prompt},
+            ],
+            temperature=0.1,
+            max_tokens=8192,
         )
     except Exception as e:
         err = str(e)
-        if "ResourceExhausted" in err or "429" in err:
-            st.error(
-                "⚠️ API 免費額度已達上限（每分鐘最多 15 次請求）。\n\n"
-                "請稍等 1 分鐘後再試，或改用其他 API Key。"
-            )
+        if "rate_limit" in err.lower() or "429" in err:
+            st.error("⚠️ 請求過於頻繁，請稍等 1 分鐘後再試。")
+        elif "401" in err or "invalid" in err.lower():
+            st.error("⚠️ API Key 無效，請確認後重新輸入。")
         else:
             st.error(f"API 呼叫失敗：{err}")
         st.stop()
 
-    raw = response.text
+    raw = response.choices[0].message.content
 
-    # Strip markdown code fences if present
     raw = re.sub(r"^```(?:json)?\s*", "", raw.strip())
     raw = re.sub(r"\s*```$", "", raw.strip())
 
@@ -182,9 +173,9 @@ def render_result(result: dict):
     icon     = SCORE_ICON.get(score, "⚪")
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("公司",   overview.get("company", "—"))
-    c2.metric("年度",   overview.get("year", "—"))
-    c3.metric("框架",   (overview.get("framework") or "—")[:22])
+    c1.metric("公司",    overview.get("company", "—"))
+    c2.metric("年度",    overview.get("year", "—"))
+    c3.metric("框架",    (overview.get("framework") or "—")[:22])
     c4.metric("整體評分", f"{icon} {score}")
 
     if assurance := overview.get("assurance"):
@@ -192,7 +183,6 @@ def render_result(result: dict):
     if boundary := overview.get("reporting_boundary"):
         st.caption(f"報告邊界：{boundary}")
 
-    # Material topics
     topics = result.get("material_topics") or []
     if topics:
         st.markdown("**重大議題（GRI 3）**")
@@ -202,7 +192,6 @@ def render_result(result: dict):
 
     st.divider()
 
-    # Chapter analysis
     st.subheader("章節分析")
     for ch in result.get("chapters") or []:
         pages  = f"（第 {ch['pages']} 頁）" if ch.get("pages") else ""
@@ -224,20 +213,19 @@ def render_result(result: dict):
                 if gris := ch.get("gri_standards"):
                     st.markdown("**對應 GRI 標準（官方）**")
                     for g in gris:
-                        q     = g.get("quality", "")
-                        ico   = QUALITY_ICON.get(q, "⚪")
-                        code  = g.get("code", "")
-                        oname = g.get("official_name", "")
-                        ev    = g.get("evidence", "")
-                        st.markdown(f"{ico} **{code}** *{oname}*")
+                        q    = g.get("quality", "")
+                        ico  = QUALITY_ICON.get(q, "⚪")
+                        code = g.get("code", "")
+                        name = g.get("official_name", "")
+                        ev   = g.get("evidence", "")
+                        st.markdown(f"{ico} **{code}** *{name}*")
                         if ev:
                             st.caption(f"　　↳ {ev}")
 
     st.divider()
 
-    # GRI Summary
     st.subheader("GRI 符合度摘要")
-    s    = result.get("gri_summary") or {}
+    s = result.get("gri_summary") or {}
     gc1, gc2, gc3 = st.columns(3)
 
     with gc1:
@@ -264,7 +252,6 @@ def render_result(result: dict):
     if note := result.get("overall_assessment"):
         st.info(f"💡 {note}")
 
-    # GRI reference footer
     with st.expander("📖 GRI 2021 官方標準代碼對照表"):
         for standard_name, disclosures in ALL_STANDARDS.items():
             st.markdown(f"**{standard_name}**")
@@ -307,7 +294,6 @@ if uploaded_files:
 
         bar.progress(1.0, text="✅ 分析完成！")
 
-    # Render results
     if st.session_state.get("results"):
         ready = [f.name for f in uploaded_files if f.name in st.session_state.results]
 
