@@ -117,10 +117,10 @@ def analyze_report(text: str, api_key: str) -> dict:
         st.error("請在左側欄位輸入 Google API Key。")
         st.stop()
 
-    MAX_CHARS = 800_000  # Gemini 1.5/2.0 supports 1M token context
+    MAX_CHARS = 120_000
     truncated = len(text) > MAX_CHARS
     display_text = text[:MAX_CHARS] if truncated else text
-    notice = "[注意：文件超過上限，以下為截取內容]" if truncated else ""
+    notice = "[注意：文件過長，已截取前段內容進行分析]" if truncated else ""
 
     prompt = SYSTEM_PROMPT + "\n\n" + ANALYSIS_PROMPT.format(
         truncated_notice=notice,
@@ -128,14 +128,26 @@ def analyze_report(text: str, api_key: str) -> dict:
     )
 
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-2.0-flash")
-    response = model.generate_content(
-        prompt,
-        generation_config=genai.GenerationConfig(
-            temperature=0.1,
-            max_output_tokens=8192,
-        ),
-    )
+    model = genai.GenerativeModel("gemini-1.5-flash")
+
+    try:
+        response = model.generate_content(
+            prompt,
+            generation_config=genai.GenerationConfig(
+                temperature=0.1,
+                max_output_tokens=8192,
+            ),
+        )
+    except Exception as e:
+        err = str(e)
+        if "ResourceExhausted" in err or "429" in err:
+            st.error(
+                "⚠️ API 免費額度已達上限（每分鐘最多 15 次請求）。\n\n"
+                "請稍等 1 分鐘後再試，或改用其他 API Key。"
+            )
+        else:
+            st.error(f"API 呼叫失敗：{err}")
+        st.stop()
 
     raw = response.text
 
