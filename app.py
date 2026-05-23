@@ -17,11 +17,11 @@ st.set_page_config(
 
 with st.sidebar:
     st.markdown("### 🔑 Google API Key")
+    st.markdown("[免費申請 API Key →](https://aistudio.google.com/app/apikey)", unsafe_allow_html=False)
     api_key = st.text_input(
         "輸入你的 Google API Key",
         type="password",
         placeholder="AIza...",
-        help="免費取得：https://aistudio.google.com/app/apikey",
     )
     if api_key:
         st.success("API Key 已設定")
