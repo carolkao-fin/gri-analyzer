@@ -29,33 +29,61 @@ with st.sidebar:
     else:
         st.warning("請先輸入 API Key 才能開始分析")
 
+# ── GRI Keyword Filter ───────────────────────────────────
+
+GRI_KEYWORDS = [
+    # GRI codes
+    "GRI", "2-", "3-", "201", "202", "203", "204", "205", "206", "207",
+    "301", "302", "303", "304", "305", "306", "307", "308",
+    "401", "402", "403", "404", "405", "406", "407", "408", "409",
+    "410", "411", "413", "414", "415", "416", "417", "418",
+    # Climate / Energy
+    "Scope", "tCO2e", "CO2", "溫室氣體", "碳排", "排放", "能源", "再生能源",
+    "MWh", "GJ", "kWh", "PPA", "REC", "SBT", "TCFD", "CDP",
+    # Water / Waste
+    "用水", "水資源", "廢水", "耗水", "廢棄物", "回收", "焚化", "掩埋",
+    "公噸", "噸", "m³", "kL",
+    # Biodiversity
+    "生物多樣", "棲地", "IUCN",
+    # Social
+    "員工", "勞工", "人數", "離職", "留任", "薪資", "工資", "育嬰",
+    "職安", "工傷", "職業病", "訓練", "培訓", "時數", "績效",
+    "多元", "性別", "女性", "歧視", "童工", "強迫勞動", "結社自由",
+    # Supply chain
+    "供應商", "供應鏈", "採購", "稽核", "評估",
+    # Governance
+    "董事", "治理", "反腐", "貪腐", "法遵", "罰款",
+    # Materiality
+    "重大性", "重大議題", "利害關係人", "雙重重大",
+    # Assurance / reporting
+    "查證", "AA1000", "SASB", "SDG", "RBA", "SA8000",
+    # Numbers with units (catch data rows)
+    "%", "萬", "億",
+]
+
+def filter_gri_lines(full_text: str) -> str:
+    """Keep only lines that contain at least one GRI-relevant keyword."""
+    lines = full_text.split("\n")
+    kept = [ln for ln in lines if any(kw in ln for kw in GRI_KEYWORDS)]
+    return "\n".join(kept)
+
+
 # ── PDF Extraction ───────────────────────────────────────
 
 def extract_pdf_text(uploaded_file) -> tuple[str, int]:
-    """
-    Extract text from key pages only:
-    - Reports ≤ 30 pages: all pages
-    - Reports > 30 pages: first 10 pages (overview/materiality) +
-                          last 12 pages (GRI index/appendices)
-    These sections contain the most GRI-relevant content.
-    """
+    """Extract full text from all pages, then filter to GRI-relevant lines."""
     data = uploaded_file.read()
     pages_text = []
     with pdfplumber.open(io.BytesIO(data)) as pdf:
         total = len(pdf.pages)
-        if total > 30:
-            front   = list(range(min(10, total)))
-            back    = list(range(max(0, total - 12), total))
-            indices = sorted(set(front + back))
-        else:
-            indices = list(range(total))
-
-        for i in indices:
-            text = pdf.pages[i].extract_text() or ""
+        for i, page in enumerate(pdf.pages):
+            text = page.extract_text() or ""
             if text.strip():
                 pages_text.append(f"[第 {i+1} 頁]\n{text}")
 
-    return "\n\n".join(pages_text), total
+    full_text    = "\n\n".join(pages_text)
+    filtered     = filter_gri_lines(full_text)
+    return filtered, total
 
 
 # ── Prompt ───────────────────────────────────────────────
