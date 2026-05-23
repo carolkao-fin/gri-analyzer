@@ -32,37 +32,28 @@ with st.sidebar:
 # ── GRI Keyword Filter ───────────────────────────────────
 
 GRI_KEYWORDS = [
-    # GRI codes
-    "GRI", "2-", "3-", "201", "202", "203", "204", "205", "206", "207",
-    "301", "302", "303", "304", "305", "306", "307", "308",
-    "401", "402", "403", "404", "405", "406", "407", "408", "409",
-    "410", "411", "413", "414", "415", "416", "417", "418",
-    # Climate / Energy
-    "Scope", "tCO2e", "CO2", "溫室氣體", "碳排", "排放", "能源", "再生能源",
-    "MWh", "GJ", "kWh", "PPA", "REC", "SBT", "TCFD", "CDP",
-    # Water / Waste
-    "用水", "水資源", "廢水", "耗水", "廢棄物", "回收", "焚化", "掩埋",
-    "公噸", "噸", "m³", "kL",
-    # Biodiversity
-    "生物多樣", "棲地", "IUCN",
-    # Social
-    "員工", "勞工", "人數", "離職", "留任", "薪資", "工資", "育嬰",
-    "職安", "工傷", "職業病", "訓練", "培訓", "時數", "績效",
-    "多元", "性別", "女性", "歧視", "童工", "強迫勞動", "結社自由",
-    # Supply chain
-    "供應商", "供應鏈", "採購", "稽核", "評估",
-    # Governance
-    "董事", "治理", "反腐", "貪腐", "法遵", "罰款",
-    # Materiality
-    "重大性", "重大議題", "利害關係人", "雙重重大",
-    # Assurance / reporting
-    "查證", "AA1000", "SASB", "SDG", "RBA", "SA8000",
-    # Numbers with units (catch data rows)
-    "%", "萬", "億",
+    # GRI codes & universal standards
+    "GRI", "AA1000", "SASB", "SA8000", "RBA", "TCFD", "CDP", "SBTi", "SBT",
+    # Climate — specific technical terms only
+    "tCO2e", "CO2e", "MWh", "GWh", "GJ", "PPA", "REC",
+    "Scope 1", "Scope 2", "Scope 3",
+    "溫室氣體", "碳排放", "再生能源", "碳中和", "淨零",
+    # Water / Waste — specific terms
+    "廢水排放", "耗水量", "取水量", "廢棄物產生", "焚化處置", "掩埋處置",
+    "生物多樣性", "IUCN",
+    # Social — specific technical/regulatory terms
+    "職業傷害", "工傷率", "職業病", "育嬰留職", "強迫勞動", "童工",
+    "結社自由", "集體協商", "重大性評估", "雙重重大性",
+    "重大議題", "利害關係人鑑別",
+    # GRI 3-digit codes (precise match)
+    "201-", "202-", "203-", "204-", "205-", "206-", "207-",
+    "301-", "302-", "303-", "304-", "305-", "306-", "308-",
+    "401-", "402-", "403-", "404-", "405-", "406-", "407-",
+    "408-", "409-", "410-", "413-", "414-", "415-", "416-", "417-", "418-",
 ]
 
 def filter_gri_lines(full_text: str) -> str:
-    """Keep only lines that contain at least one GRI-relevant keyword."""
+    """Keep only lines containing specific GRI technical keywords."""
     lines = full_text.split("\n")
     kept = [ln for ln in lines if any(kw in ln for kw in GRI_KEYWORDS)]
     return "\n".join(kept)
@@ -340,6 +331,8 @@ if uploaded_files:
                 bar.progress(i / len(uploaded_files), text=f"分析中：{f.name}")
                 f.seek(0)
                 text, page_count = extract_pdf_text(f)
+                char_count = len(text)
+                st.caption(f"📄 {f.name}｜共 {page_count} 頁｜篩選後送出 {char_count:,} 字元")
                 result = analyze_report(text, api_key)
                 result["_page_count"] = page_count
                 st.session_state.results[f.name] = result
